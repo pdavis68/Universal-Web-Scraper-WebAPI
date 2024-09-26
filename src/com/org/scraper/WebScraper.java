@@ -1,8 +1,12 @@
 package com.org.scraper;
 
+import java.io.Console;
 import java.io.IOException;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
@@ -13,16 +17,32 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.Capabilities;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.remote.DesiredCapabilities;
+import org.openqa.selenium.remote.RemoteWebDriver;
+import org.openqa.selenium.remote.http.ClientConfig;
 
 import com.org.file.ScraperFile;
 import com.org.jsengine.EngineAuthCallback;
 import com.org.jsengine.EngineCallback;
 import com.org.jsengine.PhantomJS;
 import com.org.jsoniterator.JSONIterator;
+import com.org.misc.LoggerConfig;
 import com.org.misc.Util;
 
+import io.github.bonigarcia.wdm.WebDriverManager;
+
+import java.net.URL;
+import java.time.Duration;
+
 public class WebScraper{
-	
+
+
+	private static final Logger logger = LoggerConfig.getLogger(WebScraper.class);
+
 	public enum Props { 
 		USER_AGENT, TIMEOUT, COOKIE, HEADER , PARAMS, REFERRER, METHOD, 
 		IGNRCONTTYPE, PROXY, USING_HEADLESS, ENGINE_GET_CALLBACK , ENGINE_AUTH_CALLBACK, MANUAL_AUTH};
@@ -42,6 +62,7 @@ public class WebScraper{
 	private Connection conn;
 	private Response response_conn;
 	private Map<String, String> cookies_auth;
+	private String scrapingUrl;
 	
 	// CONSTRUCTORS: ************************************************************************************
 	public WebScraper(){}
@@ -97,20 +118,25 @@ public class WebScraper{
 	}
 	
 	public WebScraper(String url){
-		conn = Jsoup.connect(url);
+		scrapingUrl = url;
+		conn = Jsoup.connect(scrapingUrl);
 		is_connected = true;
 	}
 	
 	public WebScraper(String url, boolean using_headless){
+		scrapingUrl = url;
 		engine = new PhantomJS();
 		is_using_headless = using_headless;
-		conn = Jsoup.connect(url);
+		conn = Jsoup.connect(scrapingUrl);
 		is_connected = true;
 	}
 	
 	public WebScraper(String url, Method method, boolean using_headless, String targets){
-		scrape(url, url, method, targets);
+		engine = new PhantomJS();
+		scrapingUrl = url;
 		is_using_headless = using_headless;
+		conn = Jsoup.connect(scrapingUrl);
+		scrape(scrapingUrl, scrapingUrl, method, targets);
 	}
 	
 	public WebScraper(String url, Method method, String targets){
@@ -254,6 +280,7 @@ public class WebScraper{
 			response_conn = conn.execute();
 			is_connected = false;
 		} catch (IOException e) {
+			logger.error("Error executing", e);
 			e.printStackTrace();
 		}
 		return conn;
@@ -279,6 +306,7 @@ public class WebScraper{
 						for(String field: by_tokens)
 							params_map.put(field, curld.select("input[name="+field+"]").val()); // Put the random generated field
 					} catch (IOException e) {
+						logger.error("Error fetching random generated field", e);
 						e.printStackTrace();
 					}
 				}
@@ -307,54 +335,76 @@ public class WebScraper{
 	
 	// SCRAPING FUNCTIONS:
 	public WebScraper scrape(String urlAuth, String url, Method method, String targets){
-		Document final_doc = null; // This document will fill the jsonobject 'targetsObj' object
-		
-		JSONObject targetsObj = null;
-		
-		boolean targetless = targets == null; // This means it's not scraping any data
-		
-		if(!targetless){
-			try {
-				targetsObj = ((JSONObject) new JSONParser().parse(targets.replaceAll("'","\""))); // JSON to Java Hash/Arrays
-			} catch (ParseException e1) { e1.printStackTrace(); } 
-		}
-		
-		if(is_using_headless){
-			// Before actually parsing the document, execute the javascript inside the html:
-			engine.run(url, urlAuth, cookies_auth, engine_get_callback);
+        WebDriver driver = null;
+        try {
+            driver = setupWebDriver();
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            
+			if (url == null)
+			{
+				url = scrapingUrl;
+			}
+
+			driver.get(url);
+			Document final_doc = null; // This document will fill the jsonobject 'targetsObj' object
 			
-			// After the page is finished, parse the result:
-			if(!targetless) final_doc = engine.getDocument();
-		}else if(!targetless){
-				
-			Connection conn = null;
-			if(!is_connected) conn = Jsoup.connect(url);
-			else conn = this.conn;
+			JSONObject targetsObj = null;
 			
-			is_connected = false;
+			boolean targetless = targets == null; // This means it's not scraping any data
 			
-			try {
-				conn.userAgent(USER_AGENT).timeout(timeout);
+			if(!targetless){
+				try {
+					targetsObj = ((JSONObject) new JSONParser().parse(targets.replaceAll("'","\""))); // JSON to Java Hash/Arrays
+				} catch (ParseException e1) { e1.printStackTrace(); } 
+			}
+			
+			if(is_using_headless){
+				// Before actually parsing the document, execute the javascript inside the html:
+				engine.run(url, urlAuth, cookies_auth, engine_get_callback);
 				
-				if(!is_method_set)
-					conn.method(method);
-				
-				is_method_set = false;
-				
-				// Try to access homepage (intented url), with a headless browser OR regular Jsoup
-				updateCookies(cookies_auth); // Set cookies to keep connection on
-				execute();
+				// After the page is finished, parse the result:
+				if(!targetless) final_doc = engine.getDocument();
+			}else if(!targetless){
 					
-				final_doc = response_conn.parse();
+				Connection conn = null;
+				if(!is_connected) conn = Jsoup.connect(url);
+				else conn = this.conn;
+				
+				is_connected = false;
+				
+				try {
+					conn.userAgent(USER_AGENT).timeout(timeout);
 					
-			} catch (IOException e) { e.printStackTrace(); }
-		}
-		
-		if(!targetless){
-			JSONIterator.update(targetsObj, final_doc); // Update the targets!
-			document = final_doc;
-			data = targetsObj; // Data updated
-		}
+					if(!is_method_set)
+						conn.method(method);
+					
+					is_method_set = false;
+					
+					// Try to access homepage (intented url), with a headless browser OR regular Jsoup
+					updateCookies(cookies_auth); // Set cookies to keep connection on
+					execute();
+						
+					final_doc = response_conn.parse();
+						
+				} catch (IOException e) { 
+					logger.error("Error scraping", e);
+					e.printStackTrace(); 
+				}
+			}
+			
+			if(!targetless){
+				JSONIterator.update(targetsObj, final_doc); // Update the targets!
+				document = final_doc;
+				data = targetsObj; // Data updated
+			}
+        } catch (Exception e) {
+			logger.error("Error scraping outer", e);
+            e.printStackTrace();
+        } finally {
+            if (driver != null) {
+                driver.quit();
+            }
+        }			
 		return this;
 	}
 	
@@ -383,4 +433,13 @@ public class WebScraper{
 	public String toString(){
 		return toJSON(true);
 	}
+	
+
+    private WebDriver setupWebDriver() {
+        WebDriverManager.chromedriver().setup();
+        ChromeOptions options = new ChromeOptions();
+        options.addArguments("--headless", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage");
+        return new ChromeDriver(options);
+    }
+
 }
