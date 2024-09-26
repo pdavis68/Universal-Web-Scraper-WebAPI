@@ -18,8 +18,14 @@ import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
+import org.slf4j.Logger;
+
+import com.org.misc.LoggerConfig;
+import com.org.scraper.WebScraper;
 
 public class PhantomJS {
+		private static final Logger logger = LoggerConfig.getLogger(PhantomJS.class);
+
     private WebDriver client;
     
     private final int CLIENT_WIDTH = 1920;
@@ -42,6 +48,7 @@ public class PhantomJS {
         try {
             uri = new URI(url);
         } catch (URISyntaxException e) {
+			logger.error("Error parsing URL: " + url, e);
             e.printStackTrace();
         }
         String domain = uri.getHost();
@@ -79,7 +86,10 @@ public class PhantomJS {
             File scrFile = ((TakesScreenshot)client).getScreenshotAs(OutputType.FILE);
             try { 
                 FileUtils.copyFile(scrFile, new File(screensht_filepath));
-            } catch (IOException e) { e.printStackTrace(); }
+            } catch (IOException e) { 
+				logger.error("Error Taking screenshot", e);
+				e.printStackTrace(); 
+			}
         }
         
         return null;

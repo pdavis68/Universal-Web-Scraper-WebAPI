@@ -355,7 +355,10 @@ public class WebScraper{
 			if(!targetless){
 				try {
 					targetsObj = ((JSONObject) new JSONParser().parse(targets.replaceAll("'","\""))); // JSON to Java Hash/Arrays
-				} catch (ParseException e1) { e1.printStackTrace(); } 
+				} catch (ParseException e1) {
+					logger.error("JSON Parser error, scraping", e1);
+					e1.printStackTrace(); 
+				} 
 			}
 			
 			if(is_using_headless){
